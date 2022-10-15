@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -47,6 +49,7 @@ func view_btcusdt(w http.ResponseWriter, r *http.Request) {
 			panic(err.Error())
 		}
 		defer result_history.Close()
+
 		var change Change
 		for result_history.Next() {
 			err := result_history.Scan(&change.Timestamp, &change.Value)
@@ -56,7 +59,37 @@ func view_btcusdt(w http.ResponseWriter, r *http.Request) {
 			changes.History = append(changes.History, change)
 		}
 	case "POST":
+		r.ParseForm()
+		start_time := r.Form.Get("start_time")
+    	end_time := r.Form.Get("end_time")
+		start_i, start_err := strconv.Atoi(start_time)
+		end_i, last_err := strconv.Atoi(end_time)
+		if start_err != nil || last_err != nil {
+			fmt.Println("Failed to convert filters by time")
+		}
 
+		if end_time != "" && start_time != "" && start_i < end_i {
+			result_history, err := db.Query(
+				"SELECT timestamp, value FROM changes WHERE timestamp > ? AND timestamp < ?", start_time, end_time,
+			)
+			if err != nil {
+				panic(err.Error())
+			}
+			defer result_history.Close()
+
+			var change Change
+			for result_history.Next() {
+				err := result_history.Scan(&change.Timestamp, &change.Value)
+				if err != nil {
+					panic(err.Error())
+				}
+				changes.History = append(changes.History, change)
+			}
+		} else if start_i >= end_i {
+			fmt.Println("`start_time` must be less than `end_time`")
+		} else {
+			fmt.Println("For PORT request variables `start_time` and `end_time` should be used")
+		}
 	}
 
 	json.NewEncoder(w).Encode(changes)
