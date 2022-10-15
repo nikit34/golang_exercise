@@ -10,6 +10,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+
 var db *sql.DB
 var err error
 
@@ -23,8 +24,24 @@ type Changes struct {
 	History []Change `json:"history"`
 }
 
+func make_post_select(changes *Changes, start_time string, end_time string) {
+	result_history, err := db.Query(
+		"SELECT timestamp, value FROM changes WHERE timestamp > ? AND timestamp < ?", start_time, end_time,
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer result_history.Close()
 
-
+	var change Change
+	for result_history.Next() {
+		err := result_history.Scan(&change.Timestamp, &change.Value)
+		if err != nil {
+			panic(err.Error())
+		}
+		changes.History = append(changes.History, change)
+	}
+}
 
 func view_btcusdt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -62,29 +79,16 @@ func view_btcusdt(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		start_time := r.Form.Get("start_time")
     	end_time := r.Form.Get("end_time")
+
 		start_i, start_err := strconv.Atoi(start_time)
 		end_i, last_err := strconv.Atoi(end_time)
+
 		if start_err != nil || last_err != nil {
 			fmt.Println("Failed to convert filters by time")
 		}
 
 		if end_time != "" && start_time != "" && start_i < end_i {
-			result_history, err := db.Query(
-				"SELECT timestamp, value FROM changes WHERE timestamp > ? AND timestamp < ?", start_time, end_time,
-			)
-			if err != nil {
-				panic(err.Error())
-			}
-			defer result_history.Close()
-
-			var change Change
-			for result_history.Next() {
-				err := result_history.Scan(&change.Timestamp, &change.Value)
-				if err != nil {
-					panic(err.Error())
-				}
-				changes.History = append(changes.History, change)
-			}
+			make_post_select(&changes, start_time, end_time)
 		} else if start_i >= end_i {
 			fmt.Println("`start_time` must be less than `end_time`")
 		} else {
