@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"math"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -24,15 +26,7 @@ type Changes struct {
 	History []Change `json:"history"`
 }
 
-func make_post_select(changes *Changes, start_time string, end_time string) {
-	result_history, err := db.Query(
-		"SELECT timestamp, value FROM changes WHERE timestamp > ? AND timestamp < ?", start_time, end_time,
-	)
-	if err != nil {
-		panic(err.Error())
-	}
-	defer result_history.Close()
-
+func make_post_response(changes *Changes, result_history *sql.Rows){
 	var change Change
 	for result_history.Next() {
 		err := result_history.Scan(&change.Timestamp, &change.Value)
@@ -41,6 +35,52 @@ func make_post_select(changes *Changes, start_time string, end_time string) {
 		}
 		changes.History = append(changes.History, change)
 	}
+}
+
+func make_post_select(changes *Changes) {
+	result_history, err := db.Query("SELECT timestamp, value FROM changes")
+	if err != nil {
+		panic(err.Error())
+	}
+	defer result_history.Close()
+
+	make_post_response(changes, result_history)
+}
+
+func make_post_select_time(changes *Changes, start_time, end_time string) {
+	result_history, err := db.Query(
+		"SELECT timestamp, value FROM changes WHERE timestamp > ? AND timestamp < ?", start_time, end_time,
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer result_history.Close()
+
+	make_post_response(changes, result_history)
+}
+
+func make_post_select_pagination(changes *Changes, limit, offset string) {
+	result_history, err := db.Query(
+		"SELECT timestamp, value FROM changes LIMIT ? OFFSET ?", limit, offset,
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer result_history.Close()
+
+	make_post_response(changes, result_history)
+}
+
+func make_post_select_time_pagination(changes *Changes, start_time, end_time, limit, offset string) {
+	result_history, err := db.Query(
+		"SELECT timestamp, value FROM changes WHERE timestamp > ? AND timestamp < ? LIMIT ? OFFSET ?", start_time, end_time, limit, offset,
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer result_history.Close()
+
+	make_post_response(changes, result_history)
 }
 
 func view_btcusdt(w http.ResponseWriter, r *http.Request) {
@@ -79,20 +119,31 @@ func view_btcusdt(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		start_time := r.Form.Get("start_time")
     	end_time := r.Form.Get("end_time")
+		pagination := r.Form.Get("pagination")
 
 		start_i, start_err := strconv.Atoi(start_time)
-		end_i, last_err := strconv.Atoi(end_time)
+		end_i, end_err := strconv.Atoi(end_time)
+		pagination_i, pagination_err := strconv.Atoi(pagination)
+		num_pages := math.Ceil(float64(changes.Total) / float64(pagination_i))
 
-		if start_err != nil || last_err != nil {
-			fmt.Println("Failed to convert filters by time")
-		}
-
-		if end_time != "" && start_time != "" && start_i < end_i {
-			make_post_select(&changes, start_time, end_time)
-		} else if start_i >= end_i {
-			fmt.Println("`start_time` must be less than `end_time`")
+		if start_err != nil && end_err != nil && pagination_err != nil {
+			make_post_select(&changes)
+		} else if start_err != nil && strings.Contains(start_err.Error(), "") && end_err != nil && strings.Contains(end_err.Error(), "") && pagination_err == nil {
+			for i := 0; i < int(num_pages); i++ {
+				make_post_select_pagination(&changes, pagination, string(i * pagination_i))
+			}
+		} else if start_err == nil && end_err == nil && start_i < end_i && pagination_err != nil && strings.Contains(pagination_err.Error(), "") {
+			make_post_select_time(&changes, start_time, end_time)
+		} else if start_err == nil && end_err == nil && pagination_err == nil {
+			if start_i < end_i {
+				for i := 0; i < int(num_pages); i++ {
+					make_post_select_time_pagination(&changes, start_time, end_time, pagination, string(i * pagination_i))
+				}
+			} else {
+				panic(fmt.Errorf("`start_time` must be less than `end_time`"))
+			}
 		} else {
-			fmt.Println("For PORT request variables `start_time` and `end_time` should be used")
+			panic(fmt.Errorf("failed to convert filters"))
 		}
 	}
 
